@@ -8,36 +8,22 @@ Adafruit_MMA8451 mma = Adafruit_MMA8451();
 
 // Ultrasonic sensor pins
 const int trigPin = 9;
-const int echoPin = 8;
+const int echoPin = 10;
+
+// MPU6050 I2C address
+const int MPU_ADDR = 0x68;
 
 // Variables to store sensor data
-float accelX = 0.0;
-float accelY = 0.0;
-float accelZ = 0.0;
+float mmaAccelX = 0.0, mmaAccelY = 0.0, mmaAccelZ = 0.0;
+float mpuAccelX = 0.0, mpuAccelY = 0.0, mpuAccelZ = 0.0;
 float distance = 0.0;
+float avgAccelX = 0.0, avgAccelY = 0.0, avgAccelZ = 0.0;
+float gyroX = 0.0, gyroY = 0.0, gyroZ = 0.0;
 
 // Servo motor setup
 Servo myServo;  // Create a Servo object
 int currentAngle = 0; // Variable to track the current angle of the servo
-int angleIncrement = 2.5; // Angle increment for each movement (10 degrees)
-
-// Calibration offsets for accelerometer
-float accelX_offset = 0.0;
-float accelY_offset = 0.0;
-float accelZ_offset = 0.0;
-
-// Filtering variables
-#define NUM_SAMPLES 5
-float accelX_samples[NUM_SAMPLES];
-float accelY_samples[NUM_SAMPLES];
-float accelZ_samples[NUM_SAMPLES];
-int sampleIndex = 0;
-
-// Low-pass filter constants
-float accelX_filtered = 0.0;
-float accelY_filtered = 0.0;
-float accelZ_filtered = 0.0;
-float alpha = 0.1; // Low-pass filter constant (adjust for more/less smoothing)
+int angleIncrement = 10; // Angle increment for each movement (10 degrees)
 
 void setup() {
   // Initialize Serial Monitor
@@ -60,6 +46,13 @@ void setup() {
     case MMA8451_RANGE_8_G: Serial.println("±8g"); break;
   }
 
+  // Initialize MPU6050
+  Wire.begin();
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x6B);  // Power management register
+  Wire.write(0);     // Wake up MPU6050
+  Wire.endTransmission(true);
+
   // Set up ultrasonic sensor pins
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
@@ -69,13 +62,6 @@ void setup() {
 
   // Initialize servo position
   myServo.write(currentAngle); // Set initial position
-
-  // Initialize accelerometer offset and filtering arrays
-  for (int i = 0; i < NUM_SAMPLES; i++) {
-    accelX_samples[i] = 0;
-    accelY_samples[i] = 0;
-    accelZ_samples[i] = 0;
-  }
 }
 
 void loop() {
@@ -85,42 +71,54 @@ void loop() {
     delay(500); // Wait for the servo to complete its movement
 
     // --- Read Acceleration Data ---
-    sensors_event_t event;
-    mma.getEvent(&event);
+    readMMA8451();
+    readMPU6050();
 
-    // Store current readings in the sample arrays (for moving average)
-    accelX_samples[sampleIndex] = event.acceleration.x - accelX_offset;
-    accelY_samples[sampleIndex] = event.acceleration.y - accelY_offset;
-    accelZ_samples[sampleIndex] = event.acceleration.z - accelZ_offset;
-
-    // Apply low-pass filter to the accelerometer data
-    accelX_filtered = (alpha * event.acceleration.x) + ((1 - alpha) * accelX_filtered);
-    accelY_filtered = (alpha * event.acceleration.y) + ((1 - alpha) * accelY_filtered);
-    accelZ_filtered = (alpha * event.acceleration.z) + ((1 - alpha) * accelZ_filtered);
-
-    // Move to the next sample index, looping back to 0 after NUM_SAMPLES
-    sampleIndex = (sampleIndex + 1) % NUM_SAMPLES;
-
-    // Calculate the average of the readings (moving average)
-    float avgAccelX = 0, avgAccelY = 0, avgAccelZ = 0;
-    for (int i = 0; i < NUM_SAMPLES; i++) {
-      avgAccelX += accelX_samples[i];
-      avgAccelY += accelY_samples[i];
-      avgAccelZ += accelZ_samples[i];
-    }
-    avgAccelX /= NUM_SAMPLES;
-    avgAccelY /= NUM_SAMPLES;
-    avgAccelZ /= NUM_SAMPLES;
+    // Calculate average acceleration
+    avgAccelX = (mmaAccelX + mpuAccelX) / 2.0;
+    avgAccelY = (mmaAccelY + mpuAccelY) / 2.0;
+    avgAccelZ = (mmaAccelZ + mpuAccelZ) / 2.0;
 
     // --- Read Distance from Ultrasonic Sensor ---
     distance = getUltrasonicDistance();
 
     // --- Send Data to Serial ---
-    sendDataToSerial(avgAccelX, avgAccelY, avgAccelZ, distance, accelX_filtered, accelY_filtered, accelZ_filtered);
+    sendDataToSerial(avgAccelX, avgAccelY, avgAccelZ, distance, gyroX, gyroY, gyroZ);
 
     // Short delay before moving to the next angle
     delay(200);
   }
+}
+
+// Function to read data from MMA8451
+void readMMA8451() {
+  sensors_event_t event;
+  mma.getEvent(&event);
+
+  mmaAccelX = event.acceleration.x;
+  mmaAccelY = event.acceleration.y;
+  mmaAccelZ = event.acceleration.z;
+}
+
+// Function to read data from MPU6050
+void readMPU6050() {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x3B); // Starting register for accelerometer data
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU_ADDR, 14, true); // Request 14 bytes of data
+
+  // Read accelerometer data
+  mpuAccelX = (Wire.read() << 8 | Wire.read()) / 16384.0; // Convert to g
+  mpuAccelY = (Wire.read() << 8 | Wire.read()) / 16384.0; // Convert to g
+  mpuAccelZ = (Wire.read() << 8 | Wire.read()) / 16384.0; // Convert to g
+
+  // Skip temperature data
+  Wire.read(); Wire.read();
+
+  // Read gyroscope data
+  gyroX = (Wire.read() << 8 | Wire.read()) / 131.0; // Convert to deg/s
+  gyroY = (Wire.read() << 8 | Wire.read()) / 131.0; // Convert to deg/s
+  gyroZ = (Wire.read() << 8 | Wire.read()) / 131.0; // Convert to deg/s
 }
 
 // Function to calculate distance from ultrasonic sensor
@@ -143,21 +141,21 @@ float getUltrasonicDistance() {
 }
 
 // Function to send data over serial
-void sendDataToSerial(float avgAccelX, float avgAccelY, float avgAccelZ, float distance, float accelX_filtered, float accelY_filtered, float accelZ_filtered) {
+void sendDataToSerial(float avgAccelX, float avgAccelY, float avgAccelZ, float distance, float gyroX, float gyroY, float gyroZ) {
   Serial.print(currentAngle); // Servo angle
-  Serial.print(","); 
+  Serial.print(",");
   Serial.print(avgAccelX); // Averaged Acceleration X
   Serial.print(",");
   Serial.print(avgAccelY); // Averaged Acceleration Y
   Serial.print(",");
   Serial.print(avgAccelZ); // Averaged Acceleration Z
   Serial.print(",");
-  Serial.print(distance); // Distance 
+  Serial.print(distance); // Distance
   Serial.print(",");
-  Serial.print(accelX_filtered); // Low-pass filtered Accel X
+  Serial.print(gyroX); // Gyro X
   Serial.print(",");
-  Serial.print(accelY_filtered); // Low-pass filtered Accel Y
+  Serial.print(gyroY); // Gyro Y
   Serial.print(",");
-  Serial.print(accelZ_filtered); // Low-pass filtered Accel Z
+  Serial.print(gyroZ); // Gyro Z
   Serial.println(); // Newline to separate data entries
 }
