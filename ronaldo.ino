@@ -2,9 +2,13 @@
 #include <Adafruit_MMA8451.h>
 #include <Adafruit_Sensor.h>
 #include <Servo.h>  // Include the Servo library
+#include <Adafruit_VL53L0X.h>  // Include the VL53L0X library
 
 // Create an instance of the MMA8451 sensor
 Adafruit_MMA8451 mma = Adafruit_MMA8451();
+
+// Create an instance of the VL53L0X sensor
+Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 
 // Ultrasonic sensor pins
 const int trigPin = 9;
@@ -17,6 +21,7 @@ const int MPU_ADDR = 0x68;
 float mmaAccelX = 0.0, mmaAccelY = 0.0, mmaAccelZ = 0.0;
 float mpuAccelX = 0.0, mpuAccelY = 0.0, mpuAccelZ = 0.0;
 float distance = 0.0;
+float vl53Distance = 0.0;
 float avgAccelX = 0.0, avgAccelY = 0.0, avgAccelZ = 0.0;
 float gyroX = 0.0, gyroY = 0.0, gyroZ = 0.0;
 
@@ -53,6 +58,13 @@ void setup() {
   Wire.write(0);     // Wake up MPU6050
   Wire.endTransmission(true);
 
+  // Initialize VL53L0X
+  if (!lox.begin()) {
+    Serial.println("Failed to initialize VL53L0X sensor. Check wiring!");
+    while (1); // Stop execution if sensor is not found
+  }
+  Serial.println("VL53L0X sensor initialized!");
+
   // Set up ultrasonic sensor pins
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
@@ -82,8 +94,11 @@ void loop() {
     // --- Read Distance from Ultrasonic Sensor ---
     distance = getUltrasonicDistance();
 
+    // --- Read Distance from VL53L0X Sensor ---
+    vl53Distance = getVL53L0XDistance();
+
     // --- Send Data to Serial ---
-    sendDataToSerial(avgAccelX, avgAccelY, avgAccelZ, distance, gyroX, gyroY, gyroZ);
+    sendDataToSerial(avgAccelX, avgAccelY, avgAccelZ, distance, gyroX, gyroY, gyroZ, vl53Distance);
 
     // Short delay before moving to the next angle
     delay(200);
@@ -121,6 +136,18 @@ void readMPU6050() {
   gyroZ = (Wire.read() << 8 | Wire.read()) / 131.0; // Convert to deg/s
 }
 
+// Function to read distance from VL53L0X sensor
+float getVL53L0XDistance() {
+  VL53L0X_RangingMeasurementData_t measure;
+  lox.rangingTest(&measure, false); // Perform a ranging test
+
+  if (measure.RangeStatus != 4) { // 4 means out of range
+    return measure.RangeMilliMeter / 10.0; // Convert mm to cm
+  } else {
+    return -1.0; // Indicate an error
+  }
+}
+
 // Function to calculate distance from ultrasonic sensor
 float getUltrasonicDistance() {
   // Send a 10-microsecond pulse to the TRIG pin
@@ -141,7 +168,7 @@ float getUltrasonicDistance() {
 }
 
 // Function to send data over serial
-void sendDataToSerial(float avgAccelX, float avgAccelY, float avgAccelZ, float distance, float gyroX, float gyroY, float gyroZ) {
+void sendDataToSerial(float avgAccelX, float avgAccelY, float avgAccelZ, float distance, float gyroX, float gyroY, float gyroZ, float vl53Distance) {
   Serial.print(currentAngle); // Servo angle
   Serial.print(",");
   Serial.print(avgAccelX); // Averaged Acceleration X
@@ -150,12 +177,14 @@ void sendDataToSerial(float avgAccelX, float avgAccelY, float avgAccelZ, float d
   Serial.print(",");
   Serial.print(avgAccelZ); // Averaged Acceleration Z
   Serial.print(",");
-  Serial.print(distance); // Distance
+  Serial.print(distance); // Ultrasonic Distance
   Serial.print(",");
   Serial.print(gyroX); // Gyro X
   Serial.print(",");
   Serial.print(gyroY); // Gyro Y
   Serial.print(",");
   Serial.print(gyroZ); // Gyro Z
+  Serial.print(",");
+  Serial.print(vl53Distance); // VL53L0X Distance
   Serial.println(); // Newline to separate data entries
 }
