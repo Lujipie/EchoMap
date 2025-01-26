@@ -142,7 +142,7 @@ float getVL53L0XDistance() {
   lox.rangingTest(&measure, false); // Perform a ranging test
 
   if (measure.RangeStatus != 4) { // 4 means out of range
-    return measure.RangeMilliMeter / 10.0; // Convert mm to cm
+    return measure.RangeMilliMeter; // Convert mm to cm
   } else {
     return -1.0; // Indicate an error
   }
@@ -168,7 +168,7 @@ float getUltrasonicDistance() {
 }
 
 // Function to send data over serial
-void sendDataToSerial(float avgAccelX, float avgAccelY, float avgAccelZ, float distance, float gyroX, float gyroY, float gyroZ, float vl53Distance) {
+void sendDataToSerial(float avgAccelX, float avgAccelY, float avgAccelZ, float vl53Distance, float gyroX, float gyroY, float gyroZ, float distance) {
   Serial.print(currentAngle); // Servo angle
   Serial.print(",");
   Serial.print(avgAccelX); // Averaged Acceleration X
@@ -177,7 +177,7 @@ void sendDataToSerial(float avgAccelX, float avgAccelY, float avgAccelZ, float d
   Serial.print(",");
   Serial.print(avgAccelZ); // Averaged Acceleration Z
   Serial.print(",");
-  Serial.print(distance); // Ultrasonic Distance
+  Serial.print(vl53Distance); // Ultrasonic Distance
   Serial.print(",");
   Serial.print(gyroX); // Gyro X
   Serial.print(",");
@@ -185,6 +185,5 @@ void sendDataToSerial(float avgAccelX, float avgAccelY, float avgAccelZ, float d
   Serial.print(",");
   Serial.print(gyroZ); // Gyro Z
   Serial.print(",");
-  Serial.print(vl53Distance); // VL53L0X Distance
+  Serial.print(distance); // VL53L0X Distance
   Serial.println(); // Newline to separate data entries
-}
