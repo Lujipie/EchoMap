@@ -1,1 +1,91 @@
+#include <Wire.h>
+#include <VL53L0X.h>
+#include <Servo.h>
+
+VL53L0X lox;
+Servo myServo;
+
+const int trigPin = 9;
+const int echoPin = 10;
+int currentAngle = 0;
+const int angleIncrement = 10;
+
+float mmaAccelX, mmaAccelY, mmaAccelZ;
+float mpuAccelX, mpuAccelY, mpuAccelZ;
+float avgAccelX, avgAccelY, avgAccelZ;
+float gyroX, gyroY, gyroZ;
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  lox.init();
+  lox.setTimeout(500);
+  myServo.attach(6);
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+}
+
+float getUltrasonicDistance() {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  long duration = pulseIn(echoPin, HIGH, 30000); // 30ms timeout
+  if (duration == 0) {
+    Serial.println("Ultrasonic: No echo detected!");
+    return -1.0;
+  }
+
+  return (duration * 0.0343) / 2.0;
+}
+
+float getVL53L0XDistance() {
+  VL53L0X_RangingMeasurementData_t measure;
+  lox.rangingTest(&measure, false);
+
+  if (measure.RangeStatus != 0) {
+    Serial.print("VL53L0X Error: ");
+    Serial.println(measure.RangeStatus);
+    return -1.0;
+  }
+
+  return measure.RangeMilliMeter / 10.0;
+}
+
+void sendDataToSerial(float ax, float ay, float az, float vl53Dist, float gx, float gy, float gz, float ultraDist) {
+  Serial.print("AccelX: "); Serial.print(ax);
+  Serial.print(" | AccelY: "); Serial.print(ay);
+  Serial.print(" | AccelZ: "); Serial.print(az);
+  Serial.print(" | VL53L0X: "); Serial.print(vl53Dist);
+  Serial.print(" | GyroX: "); Serial.print(gx);
+  Serial.print(" | GyroY: "); Serial.print(gy);
+  Serial.print(" | GyroZ: "); Serial.print(gz);
+  Serial.print(" | Ultrasonic: "); Serial.println(ultraDist);
+}
+
+void loop() {
+  for (currentAngle = 0; currentAngle <= 180; currentAngle += angleIncrement) {
+    myServo.write(currentAngle);
+    delay(200);
+
+    readMMA8451();
+    readMPU6050();
+
+    avgAccelX = (mmaAccelX + mpuAccelX) / 2.0;
+    avgAccelY = (mmaAccelY + mpuAccelY) / 2.0;
+    avgAccelZ = (mmaAccelZ + mpuAccelZ) / 2.0;
+
+    float distance = getUltrasonicDistance();
+    float vl53Distance = getVL53L0XDistance();
+
+    Serial.print("Servo Angle: "); Serial.print(currentAngle);
+    Serial.print(" | UltraSonic: "); Serial.print(distance);
+    Serial.print(" | VL53L0X: "); Serial.println(vl53Distance);
+
+    sendDataToSerial(avgAccelX, avgAccelY, avgAccelZ, vl53Distance, gyroX, gyroY, gyroZ, distance);
+    delay(100);
+  }
+}
 
