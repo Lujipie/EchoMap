@@ -1,7 +1,9 @@
+//ronaldo end of day 1
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_MMA8451.h>
 #include <Adafruit_MPU6050.h>
+#include <Servo.h> // Include Servo library
 
 // Define pins for the ultrasonic sensor
 #define TRIG_PIN 9 // Trigger pin is 9
@@ -11,12 +13,21 @@
 Adafruit_MMA8451 mma = Adafruit_MMA8451();
 Adafruit_MPU6050 mpu;
 
+// Servo motor setup
+Servo myServo;
+int servo_angle = 0; // Initial angle of the servo motor
+const int SERVO_PIN = 10; // Servo connected to pin 10
+
 void setup() {
-  Serial.begin(9600); // Initialize serial communication at 9600 baud
+  Serial.begin(9600);
 
   // Set up ultrasonic sensor pins
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
+
+  // Attach the servo motor
+  myServo.attach(SERVO_PIN);
+  myServo.write(servo_angle); // Start at 0 degrees
 
   // Initialize the MMA8451
   if (!mma.begin()) {
@@ -33,7 +44,7 @@ void setup() {
   }
   Serial.println("MPU6050 initialized.");
 
-  Serial.println("Ultrasonic, MPU6050, and MMA8451 sensors initialized.");
+  Serial.println("Ultrasonic, MPU6050, MMA8451, and Servo motor initialized.");
 }
 
 void loop() {
@@ -43,28 +54,24 @@ void loop() {
   float yacc_mma = (mma.y / 4096.0) * 9.80665 * 1000; // MMA8451 Y-axis in mm/s²
   float zacc_mma = (mma.z / 4096.0) * 9.80665 * 1000; // MMA8451 Z-axis in mm/s²
 
-  // Read gyroscope data from MPU6050
-  sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
-
-  // Gyroscope data in degrees per second (°/s)
-  float xgyro_mpu = g.gyro.x; // X-axis angular velocity
-  float ygyro_mpu = g.gyro.y; // Y-axis angular velocity
-  float zgyro_mpu = g.gyro.z; // Z-axis angular velocity
-
   // Read distance data from the ultrasonic sensor
   float distance_mm = getUltrasonicDistance(); // Get distance in mm
 
-  // Send data as a single line of CSV
-  Serial.print(xacc_mma, 2); Serial.print(",");
-  Serial.print(yacc_mma, 2); Serial.print(",");
-  Serial.print(zacc_mma, 2); Serial.print(",");
-  Serial.print(xgyro_mpu, 2); Serial.print(",");
-  Serial.print(ygyro_mpu, 2); Serial.print(",");
-  Serial.print(zgyro_mpu, 2); Serial.print(",");
-  Serial.println(distance_mm, 2); // Ultrasonic distance in mm
+  // Move the servo by 1 degree
+  servo_angle += 1; // Increment the angle
+  if (servo_angle > 180) {
+    servo_angle = 0; // Reset to 0 after reaching 180 degrees
+  }
+  myServo.write(servo_angle); // Set the servo angle
 
-  delay(500); // Delay for stability
+  // Print combined data as comma-separated values (without labels)
+  Serial.print(xacc_mma, 2); Serial.print(","); // MMA8451 X
+  Serial.print(yacc_mma, 2); Serial.print(","); // MMA8451 Y
+  Serial.print(zacc_mma, 2); Serial.print(","); // MMA8451 Z
+  Serial.print(distance_mm, 2); Serial.print(","); // Ultrasonic distance
+  Serial.println(servo_angle); // Servo angle
+
+  delay(100); // Small delay for stability
 }
 
 // Function to calculate distance using the ultrasonic sensor in millimeters
