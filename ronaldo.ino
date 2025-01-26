@@ -1,189 +1,85 @@
 #include <Wire.h>
-#include <Adafruit_MMA8451.h>
 #include <Adafruit_Sensor.h>
-#include <Servo.h>  // Include the Servo library
-#include <Adafruit_VL53L0X.h>  // Include the VL53L0X library
+#include <Adafruit_MMA8451.h>
+#include <Adafruit_MPU6050.h>
 
-// Create an instance of the MMA8451 sensor
+// Define pins for the ultrasonic sensor
+#define TRIG_PIN 9 // Trigger pin is 9
+#define ECHO_PIN 8 // Echo pin is 8
+
+// Create sensor objects
 Adafruit_MMA8451 mma = Adafruit_MMA8451();
-
-// Create an instance of the VL53L0X sensor
-Adafruit_VL53L0X lox = Adafruit_VL53L0X();
-
-// Ultrasonic sensor pins
-const int trigPin = 9;
-const int echoPin = 10;
-
-// MPU6050 I2C address
-const int MPU_ADDR = 0x68;
-
-// Variables to store sensor data
-float mmaAccelX = 0.0, mmaAccelY = 0.0, mmaAccelZ = 0.0;
-float mpuAccelX = 0.0, mpuAccelY = 0.0, mpuAccelZ = 0.0;
-float distance = 0.0;
-float vl53Distance = 0.0;
-float avgAccelX = 0.0, avgAccelY = 0.0, avgAccelZ = 0.0;
-float gyroX = 0.0, gyroY = 0.0, gyroZ = 0.0;
-
-// Servo motor setup
-Servo myServo;  // Create a Servo object
-int currentAngle = 0; // Variable to track the current angle of the servo
-int angleIncrement = 10; // Angle increment for each movement (10 degrees)
+Adafruit_MPU6050 mpu;
 
 void setup() {
-  // Initialize Serial Monitor
-  Serial.begin(9600);
-  Serial.println("Initializing sensors...");
-
-  // Initialize the MMA8451 accelerometer
-  if (!mma.begin()) {
-    Serial.println("Could not find MMA8451 sensor. Check wiring!");
-    while (1); // Stop execution if sensor is not found
-  }
-  Serial.println("MMA8451 found!");
-
-  // Set accelerometer range (choose from ±2g, ±4g, ±8g)
-  mma.setRange(MMA8451_RANGE_2_G);
-  Serial.print("Range set to: ");
-  switch (mma.getRange()) {
-    case MMA8451_RANGE_2_G: Serial.println("±2g"); break;
-    case MMA8451_RANGE_4_G: Serial.println("±4g"); break;
-    case MMA8451_RANGE_8_G: Serial.println("±8g"); break;
-  }
-
-  // Initialize MPU6050
-  Wire.begin();
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x6B);  // Power management register
-  Wire.write(0);     // Wake up MPU6050
-  Wire.endTransmission(true);
-
-  // Initialize VL53L0X
-  if (!lox.begin()) {
-    Serial.println("Failed to initialize VL53L0X sensor. Check wiring!");
-    while (1); // Stop execution if sensor is not found
-  }
-  Serial.println("VL53L0X sensor initialized!");
+  Serial.begin(9600); // Initialize serial communication at 9600 baud
 
   // Set up ultrasonic sensor pins
-  pinMode(trigPin, OUTPUT);
-  pinMode(echoPin, INPUT);
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
 
-  // Attach the servo to pin D10
-  myServo.attach(10); // Pin D10 for servo control
+  // Initialize the MMA8451
+  if (!mma.begin()) {
+    Serial.println("MMA8451 not detected. Halting.");
+    while (1); // Halt the program if MMA8451 is not detected
+  }
+  mma.setRange(MMA8451_RANGE_2_G); // Set MMA8451 range to ±2G
+  Serial.println("MMA8451 initialized.");
 
-  // Initialize servo position
-  myServo.write(currentAngle); // Set initial position
+  // Initialize the MPU6050
+  if (!mpu.begin()) {
+    Serial.println("MPU6050 not detected. Halting.");
+    while (1); // Halt the program if MPU6050 is not detected
+  }
+  Serial.println("MPU6050 initialized.");
+
+  Serial.println("Ultrasonic, MPU6050, and MMA8451 sensors initialized.");
 }
 
 void loop() {
-  // --- Move the Servo in Small Increments ---
-  for (currentAngle = 0; currentAngle <= 180; currentAngle += angleIncrement) {
-    myServo.write(currentAngle); // Rotate the servo to the current angle
-    delay(500); // Wait for the servo to complete its movement
+  // Read data from MMA8451
+  mma.read();
+  float xacc_mma = (mma.x / 4096.0) * 9.80665 * 1000; // MMA8451 X-axis in mm/s²
+  float yacc_mma = (mma.y / 4096.0) * 9.80665 * 1000; // MMA8451 Y-axis in mm/s²
+  float zacc_mma = (mma.z / 4096.0) * 9.80665 * 1000; // MMA8451 Z-axis in mm/s²
 
-    // --- Read Acceleration Data ---
-    readMMA8451();
-    readMPU6050();
+  // Read gyroscope data from MPU6050
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
 
-    // Calculate average acceleration
-    avgAccelX = (mmaAccelX + mpuAccelX) / 2.0;
-    avgAccelY = (mmaAccelY + mpuAccelY) / 2.0;
-    avgAccelZ = (mmaAccelZ + mpuAccelZ) / 2.0;
+  // Gyroscope data in degrees per second (°/s)
+  float xgyro_mpu = g.gyro.x; // X-axis angular velocity
+  float ygyro_mpu = g.gyro.y; // Y-axis angular velocity
+  float zgyro_mpu = g.gyro.z; // Z-axis angular velocity
 
-    // --- Read Distance from Ultrasonic Sensor ---
-    distance = getUltrasonicDistance();
+  // Read distance data from the ultrasonic sensor
+  float distance_mm = getUltrasonicDistance(); // Get distance in mm
 
-    // --- Read Distance from VL53L0X Sensor ---
-    vl53Distance = getVL53L0XDistance();
+  // Send data as a single line of CSV
+  Serial.print(xacc_mma, 2); Serial.print(",");
+  Serial.print(yacc_mma, 2); Serial.print(",");
+  Serial.print(zacc_mma, 2); Serial.print(",");
+  Serial.print(xgyro_mpu, 2); Serial.print(",");
+  Serial.print(ygyro_mpu, 2); Serial.print(",");
+  Serial.print(zgyro_mpu, 2); Serial.print(",");
+  Serial.println(distance_mm, 2); // Ultrasonic distance in mm
 
-    // --- Send Data to Serial ---
-    sendDataToSerial(avgAccelX, avgAccelY, avgAccelZ, distance, gyroX, gyroY, gyroZ, vl53Distance);
-
-    // Short delay before moving to the next angle
-    delay(200);
-  }
+  delay(500); // Delay for stability
 }
 
-// Function to read data from MMA8451
-void readMMA8451() {
-  sensors_event_t event;
-  mma.getEvent(&event);
-
-  mmaAccelX = event.acceleration.x;
-  mmaAccelY = event.acceleration.y;
-  mmaAccelZ = event.acceleration.z;
-}
-
-// Function to read data from MPU6050
-void readMPU6050() {
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x3B); // Starting register for accelerometer data
-  Wire.endTransmission(false);
-  Wire.requestFrom(MPU_ADDR, 14, true); // Request 14 bytes of data
-
-  // Read accelerometer data
-  mpuAccelX = (Wire.read() << 8 | Wire.read()) / 16384.0; // Convert to g
-  mpuAccelY = (Wire.read() << 8 | Wire.read()) / 16384.0; // Convert to g
-  mpuAccelZ = (Wire.read() << 8 | Wire.read()) / 16384.0; // Convert to g
-
-  // Skip temperature data
-  Wire.read(); Wire.read();
-
-  // Read gyroscope data
-  gyroX = (Wire.read() << 8 | Wire.read()) / 131.0; // Convert to deg/s
-  gyroY = (Wire.read() << 8 | Wire.read()) / 131.0; // Convert to deg/s
-  gyroZ = (Wire.read() << 8 | Wire.read()) / 131.0; // Convert to deg/s
-}
-
-// Function to read distance from VL53L0X sensor
-float getVL53L0XDistance() {
-  VL53L0X_RangingMeasurementData_t measure;
-  lox.rangingTest(&measure, false); // Perform a ranging test
-
-  if (measure.RangeStatus != 4) { // 4 means out of range
-    return measure.RangeMilliMeter; // Convert mm to cm
-  } else {
-    return -1.0; // Indicate an error
-  }
-}
-
-// Function to calculate distance from ultrasonic sensor
+// Function to calculate distance using the ultrasonic sensor in millimeters
 float getUltrasonicDistance() {
-  // Send a 10-microsecond pulse to the TRIG pin
-  digitalWrite(trigPin, LOW);
+  // Send a 10-microsecond pulse to the trigger pin
+  digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
-  digitalWrite(trigPin, HIGH);
+  digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
+  digitalWrite(TRIG_PIN, LOW);
 
-  // Measure the duration of the ECHO pulse
-  long duration = pulseIn(echoPin, HIGH);
+  // Measure the duration of the echo pulse
+  long duration = pulseIn(ECHO_PIN, HIGH);
 
-  // Calculate distance in cm (speed of sound = 343 m/s or 0.0343 cm/µs)
-  float distance = (duration * 0.0343) / 2.0;
-
-  // Return the distance
+  // Calculate the distance in millimeters (sound speed = 343 m/s)
+  float distance = duration * 0.343 / 2; // Convert to mm and divide by 2 for round trip
   return distance;
 }
-
-// Function to send data over serial
-void sendDataToSerial(float avgAccelX, float avgAccelY, float avgAccelZ, float vl53Distance, float gyroX, float gyroY, float gyroZ, float distance) {
-  Serial.print(currentAngle); // Servo angle
-  Serial.print(",");
-  Serial.print(avgAccelX); // Averaged Acceleration X
-  Serial.print(",");
-  Serial.print(avgAccelY); // Averaged Acceleration Y
-  Serial.print(",");
-  Serial.print(avgAccelZ); // Averaged Acceleration Z
-  Serial.print(",");
-  Serial.print(vl53Distance); // Ultrasonic Distance
-  Serial.print(",");
-  Serial.print(gyroX); // Gyro X
-  Serial.print(",");
-  Serial.print(gyroY); // Gyro Y
-  Serial.print(",");
-  Serial.print(gyroZ); // Gyro Z
-  Serial.print(",");
-  Serial.print(distance); // VL53L0X Distance
-  Serial.println(); // Newline to separate data entries
